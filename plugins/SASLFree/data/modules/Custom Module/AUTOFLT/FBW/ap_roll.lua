@@ -1,0 +1,98 @@
+roll_kp = createGlobalPropertyf("Strato/777/roll_dbg/kp", 0)
+roll_ki = createGlobalPropertyf("Strato/777/roll_dbg/ki", 0)
+roll_kd = createGlobalPropertyf("Strato/777/roll_dbg/kd", 0)
+roll_et = createGlobalPropertyf("Strato/777/roll_dbg/et", 0)
+ap_roll_eng = createGlobalPropertyi("Strato/777/roll_dbg/eng", 0)
+roll_tgt = createGlobalPropertyf("Strato/777/autopilot/roll_tgt_deg", 0)
+hdg_sel_eng = createGlobalPropertyi("Strato/777/mcp/hdg_sel_eng", 0)
+hdg_hold_eng = createGlobalPropertyi("Strato/777/mcp/hdg_hold_eng", 0)
+hdg_to_trk = createGlobalPropertyi("Strato/777/mcp/hdg_to_trk", 0)
+flt_dir_pilot = createGlobalPropertyi("Strato/777/mcp/flt_dir_pilot", 0)
+flt_dir_copilot = createGlobalPropertyi("Strato/777/mcp/flt_dir_copilot", 0)
+ap_engaged = globalPropertyi("Strato/777/mcp/ap_on", 0)
+ap_roll_on = createGlobalPropertyi("Strato/777/autopilot/ap_roll_on", 0)
+
+
+roll_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/roll_AHARS_deg_pilot")
+roll_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/roll_AHARS_deg_copilot")
+track_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/ground_track_mag_copilot")
+track_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/ground_track_mag_copilot")
+mag_heading_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/heading_AHARS_deg_mag_copilot")
+mag_heading_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/heading_AHARS_deg_mag_copilot")
+mcp_heading = globalPropertyf("sim/cockpit/autopilot/heading_mag")
+
+roll_cmd_pid = PID:new{kp = 0.09, ki = 0, kd = 0.015, errtotal = 0, errlast = 0, lim_out = 1,  lim_et = 100}
+lat_cmd_pid = PID:new{kp = 1, ki = 0, kd = 0.5, errtotal = 0, errlast = 0, lim_out = 15,  lim_et = 100}
+
+hdg_hold_to_select = false
+ap_roll_engaged = false
+hdg_hold_val = -1
+
+function getCurrLatInput()
+    local hdg_avg = (get(mag_heading_pilot) + get(mag_heading_copilot)) / 2
+    local trk_avg = (get(track_pilot) + get(track_copilot)) / 2
+    local curr_lat = hdg_avg
+    if get(hdg_to_trk) == 1 then
+        curr_lat = trk_avg
+    end
+
+    return curr_lat
+end
+
+function getAutoPilotRollMaintainCmd(roll_maint)
+    local avg_roll = (get(roll_pilot) + get(roll_copilot)) / 2
+    local roll_dir_tgt = roll_maint - avg_roll
+    set(roll_tgt, get(roll_tgt) + (roll_dir_tgt - get(roll_tgt)) * 0.2 * get(f_time))
+    roll_cmd_pid:update{tgt=roll_maint, curr=avg_roll}
+    
+    return roll_cmd_pid.output
+end
+
+function getAutopilotHdgTrkSelCmd(hdg_tgt)
+    local curr_lat = getCurrLatInput()
+
+    local tgt_ki = 0.2
+    if math.abs(curr_lat - hdg_tgt) > 3 then
+        tgt_ki = 3
+    end
+    lat_cmd_pid:update{ki=tgt_ki, tgt=hdg_tgt, curr=curr_lat}
+    set(roll_et, lat_cmd_pid.errtotal)
+    
+    return getAutoPilotRollMaintainCmd(lat_cmd_pid.output)
+end
+
+function getAutopilotHdgTrkHoldCmd()
+    local avg_roll = (get(roll_pilot) + get(roll_copilot)) / 2
+    if math.abs(avg_roll) >= 5 then
+        hdg_hold_to_select = true
+        return getAutoPilotRollMaintainCmd(0)
+    else
+        if hdg_hold_to_select or hdg_hold_val == -1 then
+            local curr_lat = round(getCurrLatInput())
+            set(mcp_heading, curr_lat)
+            hdg_hold_to_select = false
+            hdg_hold_val = curr_lat
+        end
+        return getAutopilotHdgTrkSelCmd(hdg_hold_val)
+    end
+end
+
+function getAutopilotRollCmd()
+    if get(hdg_sel_eng) == 1 then
+        hdg_hold_val = -1
+        hdg_hold_to_select = false
+        ap_roll_engaged = true
+        set(ap_roll_on, 1)
+        return getAutopilotHdgTrkSelCmd(get(mcp_heading))
+    elseif get(hdg_hold_eng) == 1 then
+        ap_roll_engaged = true
+        set(ap_roll_on, 1)
+        return getAutopilotHdgTrkHoldCmd()
+    else
+        set(ap_roll_on, 0)
+        ap_roll_engaged = false
+        hdg_hold_val = -1
+        hdg_hold_to_select = false
+        return 0
+    end
+end
