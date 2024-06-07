@@ -49,13 +49,23 @@ function getAutoPilotRollMaintainCmd(roll_maint)
 end
 
 function getAutopilotHdgTrkSelCmd(hdg_tgt)
+    local hdg_mcp = hdg_tgt
     local curr_lat = getCurrLatInput()
+
+    if math.abs(curr_lat - hdg_mcp) > 180 then
+        if hdg_mcp > curr_lat then
+            curr_lat = curr_lat + 360
+        else
+            hdg_mcp = hdg_mcp + 360
+        end
+    end
 
     local tgt_ki = 0.2
     if math.abs(curr_lat - hdg_tgt) > 3 then
         tgt_ki = 3
     end
-    lat_cmd_pid:update{ki=tgt_ki, tgt=hdg_tgt, curr=curr_lat}
+
+    lat_cmd_pid:update{ki=tgt_ki, tgt=hdg_mcp, curr=curr_lat}
     set(roll_et, lat_cmd_pid.errtotal)
     
     return getAutoPilotRollMaintainCmd(lat_cmd_pid.output)
