@@ -12,6 +12,11 @@ include("fbw_controllers.lua")
 include("ap_roll.lua")
 include("ap_pitch.lua")
 
+--Switches
+pitch_trim_A = globalPropertyi("Strato/777/cockpit/switches/strim_A")
+pitch_trim_B = globalPropertyi("Strato/777/cockpit/switches/strim_B")
+pitch_trim_altn = globalPropertyi("Strato/777/cockpit/switches/strim_altn")
+
 fbw_iasln = globalProperty("Strato/777/fctl/iasln_table")
 ace_fail = globalProperty("Strato/777/failures/fctl/ace")
 pfc_disc = globalPropertyi("Strato/777/fctl/pfc/disc")
@@ -127,7 +132,7 @@ trs_pid = PID:new{kp = -0.19, ki = -0.023, kd = 0, errtotal = 0, errlast = 0, li
 p_delta_pid = PID:new{kp = 4.1, ki = 0, kd = 0.01, errtotal = 0, errlast = 0, lim_out = 33,  lim_et = 100}
 roll_maintain_pid = PID:new{kp = 0.013, ki = 0.0006, kd = 0, errtotal = 0, errlast = 0, lim_out = 1,  lim_et = 100}
 gust_supr_pid = PID:new{kp = 0.4, ki = 0.1, kd = 0.2, errtotal = 0, errlast = 0, lim_out = 5,  lim_et = 10}
-yaw_damp_pid = PID:new{kp = 0.4, ki = 0.1, kd = 0.2, errtotal = 0, errlast = 0, lim_out = 6,  lim_et = 50}
+yaw_damp_pid = PID:new{kp = -0.8, ki = -0.2, kd = -0.15, errtotal = 0, errlast = 0, lim_out = 6,  lim_et = 50}
 
 
 function GetGearStatus()
@@ -330,21 +335,22 @@ function UpdateRollYawCommand(roll_input_last, heading_input_last, fbw_roll_past
 	local rud_out = get(pfc_pilot_input, 2) * 27
 	if not bank_prot_active then
 		rud_out = rud_out + ail_component * 8
-		--[[local supr_out = 0
-		if Round(math.abs(get(pfc_pilot_input, 1)), 2) <= 0.07 and get(fbw_mode) == 1 then
-			gust_supr_pid:update{tgt = ((avg_roll - fbw_roll_past) * 0.6), curr = avg_roll - fbw_roll_past}
-			supr_out = gust_supr_pid.output
-			set(errtotal, gust_supr_pid.errtotal)
+		if ail_component < 2 then
+			--[[local supr_out = 0
+			if Round(math.abs(get(pfc_pilot_input, 1)), 2) <= 0.07 and get(fbw_mode) == 1 then
+				gust_supr_pid:update{tgt = ((avg_roll - fbw_roll_past) * 0.6), curr = avg_roll - fbw_roll_past}
+				supr_out = gust_supr_pid.output
+				set(errtotal, gust_supr_pid.errtotal)
+			end
+			local sign_term = bool2num(avg_roll > 0) - bool2num(avg_roll < 0)
+			local yaw_term = 0.011 * avg_roll^2 * sign_term
+			local tgt_yaw = lim((yaw_term - get(pfc_flt_axes, 3)) * 0.17 + supr_out, yaw_def_max, -yaw_def_max) + ail_component * 8]]--
+			yaw_damp_pid:update{tgt=0, curr=get(yaw_rate_accel)}
+			set(dr_errtotal, yaw_damp_pid.errtotal)
+			
+			local tgt_yaw = yaw_damp_pid.output
+			rud_out = rud_out + tgt_yaw * 0.7 * get(f_time)
 		end
-		local sign_term = bool2num(avg_roll > 0) - bool2num(avg_roll < 0)
-		local yaw_term = 0.011 * avg_roll^2 * sign_term
-		local tgt_yaw = lim((yaw_term - get(pfc_flt_axes, 3)) * 0.17 + supr_out, yaw_def_max, -yaw_def_max) + ail_component * 8]]--
-		yaw_damp_pid:update{kp=get(dr_kp), ki=get(dr_ki), kd=get(dr_kd), tgt=0, 
-			curr=get(yaw_rate_accel)}
-		set(dr_errtotal, yaw_damp_pid.errtotal)
-		
-		local tgt_yaw = yaw_damp_pid.output
-		rud_out = rud_out + tgt_yaw
 	else
 		roll_maintain_pid:update{tgt = avg_roll * 0.55,  curr = fbw_roll_past - avg_roll}
 		rud_out = rud_out - roll_maintain_pid.output * 27
@@ -415,6 +421,14 @@ function update()
 	UpdateMode()
 	if get(pfc_calc) == 1 and get(f_time) ~= 0 then
 		if get(fbw_mode) == 1 then
+			if ((get(pitch_trim_A) ~= 0 and get(pitch_trim_B) ~= 0) or 
+				get(pitch_trim_altn) ~= 0)
+				and get(ap_engaged) == 1 then
+				local avg_spd = (get(cas_pilot) + get(cas_copilot)) / 2
+				set(fbw_trim_speed, avg_spd)
+				set(ap_engaged, 0)
+			end
+
 			local tmp = UpdatePFCElevatorCommand(pitch_input_last, aoa_last, 
 												k_fbw_pitch, k_fbw_flare, flare_aoa_change)
 			pitch_input_last = tmp[1]
