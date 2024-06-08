@@ -7,7 +7,7 @@ vs_cmd = createGlobalPropertyf("Strato/777/pitch_dbg/vscmd", 0)
 alt_cmd = createGlobalPropertyf("Strato/777/pitch_dbg/altcmd", 0)
 vs_tgt = createGlobalPropertyf("Strato/777/pitch_dbg/vs_tgt", 0)
 ap_pitch_eng = createGlobalPropertyi("Strato/777/pitch_dbg/eng", 0)
-vshold_eng = createGlobalPropertyi("Strato/777/mcp/vshold", 0)
+vshold_eng = createGlobalPropertyi("Strato/777/mcp/vshold", 1)
 alt_hold_eng = createGlobalPropertyi("Strato/777/mcp/althold", 0)
 curr_vert_mode = createGlobalPropertyi("Strato/777/fma/active_vert_mode", 0)
 
