@@ -257,7 +257,8 @@ function UpdatePFCElevatorCommand(pitch_input_last, pitch_last, k_pitch, k_flare
 				no_pitch_speeds[m_i-1][1])) / (no_pitch_speeds[m_i][1] - no_pitch_speeds[m_i-1][1])
 		if not ap_pitch_is_on then
 			if math.abs(get(pfc_pilot_input, 3)) > 0.08 then
-				commanded_pitch = get(pfc_pilot_input, 3) * 3.7
+				local k_man = 3.7 + 2 * math.abs(get(pfc_pilot_input, 3))
+				commanded_pitch = get(pfc_pilot_input, 3) * k_man
 			end
 		else
 			fbw_pitch = ap_pitch_cmd
@@ -373,7 +374,7 @@ function UpdateStabTrim()
 			if stab_trim_engage == 1 and pitch_time_no_delta + 2 < get(c_time) then
 				local s_ = 0.0002
 				if get(pfc_flaps) > 5 then
-					s_ = 0.0001
+					s_ = 0.0004
 				end
 				local step = (-bool2num(get(pfc_elevator_command) < 0) + bool2num(get(pfc_elevator_command) >= 0)) * s_
 				if math.abs(get(pfc_ths_current) + step) < 1 then

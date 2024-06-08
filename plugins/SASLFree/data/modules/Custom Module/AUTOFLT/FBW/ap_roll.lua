@@ -20,6 +20,8 @@ track_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/ground_track_mag
 mag_heading_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/heading_AHARS_deg_mag_copilot")
 mag_heading_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/heading_AHARS_deg_mag_copilot")
 mcp_heading = globalPropertyf("sim/cockpit/autopilot/heading_mag")
+cas_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/airspeed_kts_pilot")
+cas_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/airspeed_kts_copilot")
 
 roll_cmd_pid = PID:new{kp = 0.09, ki = 0, kd = 0.015, errtotal = 0, errlast = 0, lim_out = 1,  lim_et = 100}
 lat_cmd_pid = PID:new{kp = 1, ki = 0, kd = 0.5, errtotal = 0, errlast = 0, lim_out = 15,  lim_et = 100}
@@ -39,10 +41,21 @@ function getCurrLatInput()
     return curr_lat
 end
 
+function getAutoBankLimit(ias)
+    if ias > 210 then
+        return 15
+    elseif ias <= 210 and ias >= 180 then
+        return 15 + (210 - ias) * 10 / 30
+    else
+        return 25
+    end
+end
+
 function getAutoPilotRollMaintainCmd(roll_maint)
     local avg_roll = (get(roll_pilot) + get(roll_copilot)) / 2
     local roll_dir_tgt = roll_maint - avg_roll
     set(roll_tgt, get(roll_tgt) + (roll_dir_tgt - get(roll_tgt)) * 0.2 * get(f_time))
+    
     roll_cmd_pid:update{tgt=roll_maint, curr=avg_roll}
     
     return roll_cmd_pid.output
@@ -65,7 +78,10 @@ function getAutopilotHdgTrkSelCmd(hdg_tgt)
         tgt_ki = 3
     end
 
-    lat_cmd_pid:update{ki=tgt_ki, tgt=hdg_mcp, curr=curr_lat}
+    local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
+    local bank_limit = getAutoBankLimit(avg_ias)
+
+    lat_cmd_pid:update{ki=tgt_ki, tgt=hdg_mcp, curr=curr_lat, lim_out=bank_limit}
     set(roll_et, lat_cmd_pid.errtotal)
     
     return getAutoPilotRollMaintainCmd(lat_cmd_pid.output)
