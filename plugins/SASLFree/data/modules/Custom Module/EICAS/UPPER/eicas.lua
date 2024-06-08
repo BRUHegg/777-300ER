@@ -9,13 +9,16 @@
 addSearchPath(moduleDirectory .. "/Custom Module/")
 
 include("misc_tools.lua")
+include("constants.lua")
 
 --Finding sim datarefs
 
 --Cockpit controls
 park_brake_valve = globalPropertyi("Strato/777/gear/park_brake_valve")
 throttle_pos = globalPropertyf("sim/cockpit2/engine/actuators/throttle_jet_rev_ratio_all")
-spoiler_handle = globalPropertyf("sim/cockpit2/controls/speedbrake_ratio")
+throttle_L = globalPropertyfae("sim/cockpit2/engine/actuators/throttle_jet_rev_ratio", 1)
+throttle_R = globalPropertyfae("sim/cockpit2/engine/actuators/throttle_jet_rev_ratio", 2)
+spoiler_handle = globalPropertyf("Strato/777/cockpit/switches/sb_handle")
 stab_trim = globalPropertyf("sim/cockpit2/controls/elevator_trim")
 --Electrical
 battery = globalPropertyiae("sim/cockpit2/electrical/battery_on", 1)
@@ -379,10 +382,12 @@ function UpdateFlaps() --this is for updating flap position on eicas
 	local tape_height = 300
 	local color = {0, 1, 0}
 	local magenta = {0.94, 0.57, 1}
-	flap_settings = {0, 1, 5, 15, 20, 25, 30}
+	flap_settings_disp = {0, 1, 5, 15, 20, 25, 30}
+	flap_settings = {0, 1, 9, 15, 20, 25, 30}
 	text = {"F", "L", "A", "P", "S"}
 	detents = {0, 0.17, 0.33, 0.5, 0.67, 0.83, 1}
 	local setting = flap_settings[indexOf(detents, get(flap_handle), 1)]
+	local setting_disp = flap_settings_disp[indexOf(detents, get(flap_handle), 1)]
 	local cur_flap = 0
 	if get(flaps) ~= nil then
 		cur_flap = get(flaps)
@@ -408,7 +413,7 @@ function UpdateFlaps() --this is for updating flap position on eicas
 		sasl.gl.drawRectangle(1000, 530, 50,  - 530 + flaps_on_screen, {1, 1, 1})
 		sasl.gl.drawWideLine(990, handle_on_screen, 1060, handle_on_screen, 6, color)
 		if setting ~= 0 then
-			drawText(font, 1070, handle_on_screen - 15, tostring(setting), 45, false, false, TEXT_ALIGN_LEFT, color)
+			drawText(font, 1070, handle_on_screen - 15, tostring(setting_disp), 45, false, false, TEXT_ALIGN_LEFT, color)
 		else
 			drawText(font, 1070, handle_on_screen - 15, "UP", 45, false, false, TEXT_ALIGN_LEFT, color)
 		end
@@ -424,6 +429,8 @@ function UpdateEicasWarnings(messages, conf_warn)
 	local avg_cas = (get(cas_pilot) + get(cas_copilot)) / 2
 	local avg_ra = (get(ra_pilot) + get(ra_copilot)) / 2
 	local to_flaps = {5, 15, 20}
+	local tmp_warns = {}
+	local n_config_warnings = 0
 	if get(on_ground) == 0 then
 		if avg_cas < get(stall_speed) then
 			table.insert(messages, tlen(messages) + 1, "STALL")
@@ -432,37 +439,35 @@ function UpdateEicasWarnings(messages, conf_warn)
 		end
 	else
 		--Config warnings
-		local tmp_warns = {}
-		local n_warns = 0
-		if get(throttle_pos) > 0.5 then
+		if get(throttle_L) > 0.5 or get(throttle_R) > 0.5 then
 			local idx = indexOf(to_flaps, get(flaps), 1)
 			if get(spoiler_handle) < 0 then
 				table.insert(tmp_warns, tlen(tmp_warns) + 1, "CONFIG SPOILERS")
-				n_warns = n_warns + 1
+				n_config_warnings = n_config_warnings + 1
 			end
 			if get(stab_trim) < ths_min_val_conv or get(stab_trim) > ths_max_val_conv then
 				table.insert(tmp_warns, tlen(tmp_warns) + 1, "CONFIG STABILIZER")
-				n_warns = n_warns + 1
+				n_config_warnings = n_config_warnings + 1
 			end
 			if get(park_brake_valve) == 1 then
 				table.insert(tmp_warns, tlen(tmp_warns) + 1, "CONFIG PARKING BRAKE")
-				n_warns = n_warns + 1
+				n_config_warnings = n_config_warnings + 1
 			end
 			if get(main_s_locked) == 0 then
 				table.insert(tmp_warns, tlen(tmp_warns) + 1, "CONFIG GEAR STEERING")
-				n_warns = n_warns + 1
+				n_config_warnings = n_config_warnings + 1
 			end
 			if idx == nil then
 				table.insert(tmp_warns, tlen(tmp_warns) + 1, "CONFIG FLAPS")
-				n_warns = n_warns + 1
+				n_config_warnings = n_config_warnings + 1
 			end
 		end
-		if (get(c_time) >= conf_time + 10 and n_conf_warns_past == 0) or n_warns > 0 then
-			conf_warn = tmp_warns
-			conf_time = get(c_time)
-		end
-		n_conf_warns_past = n_warns
 	end
+	if (get(c_time) >= conf_time + 10 and n_conf_warns_past == 0) or n_config_warnings > 0 then
+		conf_warn = tmp_warns
+		conf_time = get(c_time)
+	end
+	n_conf_warns_past = n_config_warnings
 	for k in pairs(conf_warn) do
 		table.insert(messages, tlen(messages) + 1, conf_warn[k])
 	end
@@ -558,7 +563,7 @@ end
 function DisplayMessages(messages, offset, color, step, start_p, end_p)
 	if end_p >= start_p then
 		local hyd_idx = nil
-		local fctl_mode_idx = indexOf(messages, "FLIGHT CONTROL MODE")
+		local fctl_mode_idx = indexOf(messages, "PRI FLIGHT COMPUTERS")
 		local hyd_press_idx1 = indexOf(messages, "HYD PRESS SYS L")
 		local hyd_press_idx2 = indexOf(messages, "HYD PRESS SYS C")
 		local hyd_press_idx3 = indexOf(messages, "HYD PRESS SYS R")
@@ -573,9 +578,9 @@ function DisplayMessages(messages, offset, color, step, start_p, end_p)
 		for i=1,end_p - start_p + 1 do
 			local curr_idx = start_p + i - 1
 			local curr_msg = messages[curr_idx]
-			if fctl_idx ~= nil and curr_idx > fctl_idx then
-				curr_msg = " "..curr_msg
-			elseif fctl_idx == nil and hyd_idx ~= nil and curr_idx > hyd_idx then
+			if (fctl_idx ~= nil and curr_idx > fctl_idx) or 
+			   (fctl_idx == nil and hyd_idx ~= nil and curr_idx > hyd_idx) or 
+			   (fctl_idx == nil and hyd_idx == nil and fctl_mode_idx ~= nil and curr_idx > fctl_mode_idx) then
 				curr_msg = " "..curr_msg
 			end
 			drawText(font, 830, offset - step * (i - 1), curr_msg, 50, false, false, TEXT_ALIGN_LEFT, color)
