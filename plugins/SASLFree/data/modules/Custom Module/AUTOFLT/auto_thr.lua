@@ -8,7 +8,8 @@ tgt_ias = globalPropertyf("sim/cockpit2/autopilot/airspeed_dial_kts")
 autothr_arm = globalPropertyi("Strato/777/mcp/at_arm", 1)
 spd_hold = globalPropertyi("Strato/777/mcp/spd_hold", 0)
 toga = globalPropertyi("Strato/777/mcp/toga", 0)
-throt_lim = createGlobalPropertyf("Strato/777/autothr/thr_lim", 0.95)
+at_disc = globalPropertyi("Strato/777/mcp/at_disc", 0)
+n1_lim = createGlobalPropertyf("Strato/777/autothr/n1_lim", 95)
 throt_res_rt = createGlobalPropertyf("Strato/777/autothr/throt_res_rt", 0.95)
 
 thr_kp = createGlobalPropertyf("Strato/777/autothr_dbg/kp", 0.00004)
@@ -19,6 +20,8 @@ thr_cmd = createGlobalPropertyf("Strato/777/autothr_dbg/cmd", 0)
 thr_resp = createGlobalPropertyf("Strato/777/autothr_dbg/resp", 0.04)
 pred_ias_kt = createGlobalPropertyf("Strato/777/autothr_dbg/pred_ias_kt", 0)
 pred_ias_sec = createGlobalPropertyf("Strato/777/autothr_dbg/pred_ias_sec", 10)
+
+autothr_mode_dr = createGlobalPropertyi("Strato/777/fma/at_mode", 0)
 
 throttle_cmd = globalPropertyf("sim/cockpit2/engine/actuators/throttle_ratio_all")
 L_reverser_deployed = globalPropertyiae("sim/cockpit2/annunciators/reverser_on", 1)
@@ -39,6 +42,8 @@ ra_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/radio_altimeter_hei
 vs_pilot_fpm = globalPropertyf("sim/cockpit2/gauges/indicators/vvi_fpm_pilot")
 vs_copilot_fpm = globalPropertyf("sim/cockpit2/gauges/indicators/vvi_fpm_copilot")
 
+engn_L_n1 = globalPropertyfae("sim/flightmodel/engine/ENGN_N1_", 1)
+engn_R_n1 = globalPropertyfae("sim/flightmodel/engine/ENGN_N1_", 2)
 
 f_time = globalPropertyf("sim/operation/misc/frame_rate_period")
 
@@ -57,6 +62,7 @@ PITCH_MAX = 15
 PITCH_MIN = 0
 THR_SERVO_RESPONSE = 0.002
 AT_FLARE_ENTRY_FT = 100
+THR_MAX_N1_DEV = 4
 
 at_flare_begin_ft = 0
 
@@ -75,11 +81,19 @@ function getThrottleIdleAltitudeFt(vs_entry)
     return 50 + (vs_calc / 1500) * 30
 end
 
+function getThrottleN1HoldCmd()  -- Just holds the n1 at n1_lim
+    local avg_n1 = (get(engn_L_n1) + get(engn_R_n1)) / 2
+    local n1_err = get(n1_lim) - avg_n1
+    return AT_KP * n1_err
+end
+
 function setThrottleIASHoldCmd()
     at_engaged = true
     if get(f_time) ~= 0 then
         local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
         local avg_pitch = (get(pitch_pilot) + get(pitch_copilot)) / 2
+        local avg_n1 = (get(engn_L_n1) + get(engn_R_n1)) / 2
+
         avg_pitch = lim(avg_pitch, PITCH_MAX, PITCH_MIN)
         local min_idle = get(thr_resp) * avg_pitch
 
@@ -96,7 +110,12 @@ function setThrottleIASHoldCmd()
         autothrot_pid:update{tgt=get(tgt_ias), curr=ias_predict}
         --set(thr_et, autothrot_pid.errtotal)
         set(thr_cmd, autothrot_pid.output)
-        local autothr_cmd = lim(get(throttle_cmd)+autothrot_pid.output, get(throt_lim), min_idle)
+        local autothr_cmd = lim(get(throttle_cmd)+autothrot_pid.output, 1, min_idle)
+        if autothr_cmd > get(throttle_cmd) and 
+            (math.abs(avg_n1 - get(n1_lim)) <= THR_MAX_N1_DEV or avg_n1 > get(n1_lim)) then
+            local n1_hold_cmd = getThrottleN1HoldCmd()
+            autothr_cmd = lim(get(throttle_cmd)+n1_hold_cmd, 1, min_idle)
+        end
         local thr_lvr_cmd = EvenChange(get(throttle_cmd), autothr_cmd, THR_SERVO_RESPONSE)
         set(throttle_cmd, thr_lvr_cmd)
         ias_last = avg_ias
@@ -109,17 +128,27 @@ function setThrottleRetardCmd()
     set(throttle_cmd, thr_lvr_cmd)
 end
 
+function setThrottleRefCmd()
+    local n1_hold_cmd = getThrottleN1HoldCmd()
+    local autothr_cmd = lim(get(throttle_cmd)+n1_hold_cmd, 1, 0)
+    local thr_lvr_cmd = EvenChange(get(throttle_cmd), autothr_cmd, THR_SERVO_RESPONSE)
+    set(throttle_cmd, thr_lvr_cmd)
+end
+
 function updateMode()
     local avg_ra = (get(ra_pilot) + get(ra_copilot)) / 2
     local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
 
-    if get(L_reverser_deployed) == 1 or get(R_reverser_deployed) == 1 then
+    if get(L_reverser_deployed) == 1 or get(R_reverser_deployed) == 1 or 
+        get(at_disc) == 1 then
         curr_at_mode = AT_MODE_OFF
         set(spd_hold, 0)
+        set(toga, 0)
         ra_last = avg_ra
         return
     end
-    if avg_ias <= 50 and get(autothr_arm) == 1 and get(toga) == 1 then
+    if avg_ias <= 50 and get(autothr_arm) == 1 and get(toga) == 1 and 
+        curr_at_mode ~= AT_MODE_HOLD then
         curr_at_mode = AT_MODE_THR_REF
         at_engaged = false
     elseif avg_ias > 50 and curr_at_mode == AT_MODE_THR_REF then
@@ -156,5 +185,8 @@ function update()
         setThrottleIASHoldCmd()
     elseif curr_at_mode == AT_MODE_RETARD then
         setThrottleRetardCmd()
+    elseif curr_at_mode == AT_MODE_THR_REF then
+        setThrottleRefCmd()
     end
+    set(autothr_mode_dr, curr_at_mode)
 end
