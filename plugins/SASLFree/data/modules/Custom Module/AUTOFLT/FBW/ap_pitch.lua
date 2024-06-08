@@ -35,6 +35,16 @@ alt_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/altitude_ft_copilo
 vs_pilot_fpm = globalPropertyf("sim/cockpit2/gauges/indicators/vvi_fpm_pilot")
 vs_copilot_fpm = globalPropertyf("sim/cockpit2/gauges/indicators/vvi_fpm_copilot")
 
+--Spoilers:
+spoiler_L1_act = globalPropertyfae("sim/flightmodel2/wing/spoiler1_deg", 3) --#4
+spoiler_L2_act = globalPropertyfae("sim/flightmodel2/wing/spoiler2_deg", 3)
+spoiler_R1_act = globalPropertyfae("sim/flightmodel2/wing/spoiler1_deg", 4) --#11
+spoiler_R2_act = globalPropertyfae("sim/flightmodel2/wing/spoiler2_deg", 4)
+spoiler_6_act = globalPropertyfae("sim/flightmodel2/wing/speedbrake1_deg", 1)
+spoiler_7_act = globalPropertyfae("sim/flightmodel2/wing/speedbrake2_deg", 1)
+spoiler_8_act = globalPropertyfae("sim/flightmodel2/wing/speedbrake2_deg", 2)
+spoiler_9_act = globalPropertyfae("sim/flightmodel2/wing/speedbrake1_deg", 2)
+
 
 vshold_pid = PID:new{kp = 0, ki = 0, kd = 0, errtotal = 0, errlast = 0, lim_out = 1,  lim_et = 100}
 
@@ -73,10 +83,17 @@ function getIASCorrection()
 
         ias_last = ias_avg_kts
 
-        return ias_accel * get(pitch_resp)
+        return ias_accel * -0.11
     else
         return 0
     end
+end
+
+function getSpoilerCorrection()
+    local sp_avg = (get(spoiler_L1_act) + get(spoiler_L2_act) + 
+        get(spoiler_R1_act) + get(spoiler_R2_act) + get(spoiler_6_act) + 
+        get(spoiler_7_act) + get(spoiler_8_act) + get(spoiler_9_act)) / 8
+    return sp_avg * 0.07
 end
 
 function getAutopilotVSHoldCmd(pitch_cmd_prev, vs_cmd_fpm)
@@ -89,7 +106,7 @@ function getAutopilotVSHoldCmd(pitch_cmd_prev, vs_cmd_fpm)
         set(vs_pred_fpm, vs_pred)
 
         local tgt_kp = 0.0005
-        if round(get(pfc_flaps)) >= 15 then
+        if round(get(pfc_flaps)) >= 5 then
             tgt_kp = 0.001
         end
 
@@ -109,8 +126,21 @@ function getAutopilotVSHoldCmd(pitch_cmd_prev, vs_cmd_fpm)
 end
 
 function getAutopilotVSHoldCmdFull()
+    local alt_avg_ft = (get(alt_pilot) + get(alt_copilot)) / 2
+    local vs_avg_fpm = (get(vs_pilot_fpm) + get(vs_copilot_fpm)) / 2
+
+    local alt_err = get(mcp_alt_val) - alt_avg_ft
+    local alt_intcpt_margin_ft = 500
+    if vs_avg_fpm > 1300 then
+        alt_intcpt_margin_ft = alt_intcpt_margin_ft + (vs_avg_fpm - 1300) * (450/1300)
+    end
+    if alt_err > 0 and alt_err <= alt_intcpt_margin_ft and vs_hold_vs_tgt > 0 then
+        vs_hold_vs_tgt = lim(vs_hold_vs_tgt, 700, 0)
+    elseif alt_err < 0 and alt_err >= -alt_intcpt_margin_ft and vs_hold_vs_tgt < 0 then
+        vs_hold_vs_tgt = lim(vs_hold_vs_tgt, 0, -700)
+    end
     vshold_pitch_deg = getAutopilotVSHoldCmd(vshold_pitch_deg, vs_hold_vs_tgt) 
-    return vshold_pitch_deg + getIASCorrection()
+    return vshold_pitch_deg + getIASCorrection() + getSpoilerCorrection()
 end
 
 function getAutopilotAltHoldCmd()

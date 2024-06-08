@@ -373,8 +373,8 @@ function UpdateStabTrim()
 			end
 			if stab_trim_engage == 1 and pitch_time_no_delta + 2 < get(c_time) then
 				local s_ = 0.0002
-				if get(pfc_flaps) > 5 then
-					s_ = 0.0004
+				if get(pfc_flaps) > 4 then
+					s_ = 0.00045
 				end
 				local step = (-bool2num(get(pfc_elevator_command) < 0) + bool2num(get(pfc_elevator_command) >= 0)) * s_
 				if math.abs(get(pfc_ths_current) + step) < 1 then
