@@ -23,6 +23,7 @@ pred_ias_sec = createGlobalPropertyf("Strato/777/autothr_dbg/pred_ias_sec", 10)
 
 autothr_mode_dr = createGlobalPropertyi("Strato/777/fma/at_mode", 0)
 curr_vert_mode = globalPropertyi("Strato/777/fma/active_vert_mode")
+alt_acq = globalPropertyi("Strato/777/fma/alt_acq")
 
 throttle_cmd = globalPropertyf("sim/cockpit2/engine/actuators/throttle_ratio_all")
 L_reverser_deployed = globalPropertyiae("sim/cockpit2/annunciators/reverser_on", 1)
@@ -68,6 +69,8 @@ AT_MODE_IAS_HOLD = 1
 AT_MODE_RETARD = 2
 AT_MODE_HOLD = 3
 AT_MODE_THR_REF = 4
+AT_MODE_FLC_RETARD = 5
+AT_MODE_FLC_REF = 6
 
 curr_at_mode = AT_MODE_OFF
 at_engaged = false
@@ -84,7 +87,7 @@ function getThrottleN1HoldCmd()  -- Just holds the n1 at n1_lim
     return AT_KP * n1_err
 end
 
-function setThrottleIASHoldCmd()
+function setThrottleIASHoldCmd(ias_tgt_kts)
     at_engaged = true
     if get(f_time) ~= 0 then
         local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
@@ -99,7 +102,7 @@ function setThrottleIASHoldCmd()
         local ias_accel = (avg_ias - ias_last) / get(f_time)
         local gs_accel = (curr_gs - gs_last) / get(f_time)
 
-        local ias_err = get(tgt_ias) - avg_ias
+        local ias_err = ias_tgt_kts - avg_ias
         local at_out = AT_KP * ias_err - AT_KD * (gs_accel - (avg_vs / 16000))
         set(thr_cmd, at_out)
         local autothr_cmd = lim(get(throttle_cmd)+at_out, 1, min_idle)
@@ -115,11 +118,7 @@ function setThrottleIASHoldCmd()
     end
 end
 
-function setThrottleRetardCmd(v_mode)
-    local spd_set = THR_SERVO_RESPONSE
-    if v_mode == 4 then  -- Flc descend
-        spd_set = spd_set / 10
-    end
+function setThrottleRetardCmd()
     local thr_lvr_cmd = EvenChange(get(throttle_cmd), 0, THR_SERVO_RESPONSE)
     set(throttle_cmd, thr_lvr_cmd)
 end
@@ -131,10 +130,17 @@ function setThrottleRefCmd()
     set(throttle_cmd, thr_lvr_cmd)
 end
 
-function updateMode()
+function setThrottleFlcCmd(v_mode)
+    if v_mode == 3 then  -- Flc climb
+        setThrottleIASHoldCmd(get(tgt_ias)+35)
+    else
+        setThrottleIASHoldCmd(get(tgt_ias)-8)
+    end
+end
+
+function updateMode(v_mode)
     local avg_ra = (get(ra_pilot) + get(ra_copilot)) / 2
     local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
-    local v_mode = get(curr_vert_mode)
 
     if get(L_reverser_deployed) == 1 or get(R_reverser_deployed) == 1 or 
         get(at_disc) == 1 then
@@ -144,6 +150,9 @@ function updateMode()
         ra_last = avg_ra
         return
     end
+    if (v_mode < 3 or get(alt_acq) == 1) and curr_at_mode >= AT_MODE_FLC_RETARD then
+        set(spd_hold, 1)
+    end
     if avg_ias <= 50 and get(autothr_arm) == 1 and get(toga) == 1 and 
         curr_at_mode ~= AT_MODE_HOLD then
         curr_at_mode = AT_MODE_THR_REF
@@ -151,12 +160,13 @@ function updateMode()
     elseif avg_ias > 50 and curr_at_mode == AT_MODE_THR_REF and v_mode == 0 then
         curr_at_mode = AT_MODE_HOLD
         at_engaged = false
-    elseif (avg_ra > 400 or at_engaged) and v_mode >= 3 then
+    elseif (avg_ra > 400 or at_engaged) and v_mode >= 3 and get(alt_acq) == 0 then
         if v_mode == 3 then
-            curr_at_mode = AT_MODE_THR_REF
+            curr_at_mode = AT_MODE_FLC_REF
         else
-            curr_at_mode = AT_MODE_RETARD
+            curr_at_mode = AT_MODE_FLC_RETARD
         end
+        set(spd_hold, 0)
     elseif get(autothr_arm) == 1 and get(spd_hold) == 1 then
         if (avg_ra > 400 and (curr_at_mode == AT_MODE_HOLD or 
             curr_at_mode == AT_MODE_OFF)) or at_engaged then 
@@ -179,17 +189,20 @@ end
 
 
 function update()
-    updateMode()
+    local v_mode = get(curr_vert_mode)
+    updateMode(v_mode)
     if curr_at_mode ~= AT_MODE_IAS_HOLD then
         ias_last = (get(cas_pilot) + get(cas_copilot)) / 2
         gs_last = get(gs_dref)
     end
     if curr_at_mode == AT_MODE_IAS_HOLD then
-        setThrottleIASHoldCmd()
+        setThrottleIASHoldCmd(get(tgt_ias))
     elseif curr_at_mode == AT_MODE_RETARD then
         setThrottleRetardCmd()
     elseif curr_at_mode == AT_MODE_THR_REF then
         setThrottleRefCmd()
+    elseif curr_at_mode >= AT_MODE_FLC_RETARD then
+        setThrottleFlcCmd(v_mode)
     end
     set(autothr_mode_dr, curr_at_mode)
 end
