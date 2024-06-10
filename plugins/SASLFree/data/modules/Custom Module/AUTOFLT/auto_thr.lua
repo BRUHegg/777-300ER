@@ -12,9 +12,9 @@ at_disc = globalPropertyi("Strato/777/mcp/at_disc", 0)
 n1_lim = createGlobalPropertyf("Strato/777/autothr/n1_lim", 95)
 throt_res_rt = createGlobalPropertyf("Strato/777/autothr/throt_res_rt", 0.95)
 
-thr_kp = createGlobalPropertyf("Strato/777/autothr_dbg/kp", 0.00004)
+thr_kp = createGlobalPropertyf("Strato/777/autothr_dbg/kp", 0.000045)
 thr_ki = createGlobalPropertyf("Strato/777/autothr_dbg/ki", 0.000)
-thr_kd = createGlobalPropertyf("Strato/777/autothr_dbg/kd", 0.00001)
+thr_kd = createGlobalPropertyf("Strato/777/autothr_dbg/kd", 0.00058)
 thr_et = createGlobalPropertyf("Strato/777/autothr_dbg/et", 0)
 thr_cmd = createGlobalPropertyf("Strato/777/autothr_dbg/cmd", 0)
 thr_resp = createGlobalPropertyf("Strato/777/autothr_dbg/resp", 0.04)
@@ -22,6 +22,7 @@ pred_ias_kt = createGlobalPropertyf("Strato/777/autothr_dbg/pred_ias_kt", 0)
 pred_ias_sec = createGlobalPropertyf("Strato/777/autothr_dbg/pred_ias_sec", 10)
 
 autothr_mode_dr = createGlobalPropertyi("Strato/777/fma/at_mode", 0)
+curr_vert_mode = globalPropertyi("Strato/777/fma/active_vert_mode")
 
 throttle_cmd = globalPropertyf("sim/cockpit2/engine/actuators/throttle_ratio_all")
 L_reverser_deployed = globalPropertyiae("sim/cockpit2/annunciators/reverser_on", 1)
@@ -31,6 +32,7 @@ ra_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/radio_altimeter_heigh
 ra_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_copilot")
 cas_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/airspeed_kts_pilot")
 cas_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/airspeed_kts_copilot")
+gs_dref = globalPropertyf("sim/cockpit2/gauges/indicators/ground_speed_kt")
 
 -- We use pitch here to limit idle thrust
 pitch_pilot = globalPropertyf("sim/cockpit/gyros/the_ind_ahars_pilot_deg")
@@ -47,17 +49,12 @@ engn_R_n1 = globalPropertyfae("sim/flightmodel/engine/ENGN_N1_", 2)
 
 f_time = globalPropertyf("sim/operation/misc/frame_rate_period")
 
-AT_KP = 0.00004
-AT_KP_EXTRA = 0.00008
-AT_KI = 0.00001
-
-autothrot_pid = PID:new{kp = AT_KP, ki = AT_KI, kd = 0, errtotal = 0, errlast = 0, lim_out = 1,  lim_et = 100}
+AT_KP = 0.000045
+AT_KD = 0.00058
 
 ias_last = 0
 gs_last = 0
 ra_last = 0
-pitch_last = 0
-N_SEC_SPD_PREDICT = 10
 PITCH_MAX = 15
 PITCH_MIN = 0
 THR_SERVO_RESPONSE = 0.002
@@ -92,25 +89,20 @@ function setThrottleIASHoldCmd()
     if get(f_time) ~= 0 then
         local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
         local avg_pitch = (get(pitch_pilot) + get(pitch_copilot)) / 2
+        local avg_vs = (get(vs_pilot_fpm) + get(vs_copilot_fpm)) / 2
         local avg_n1 = (get(engn_L_n1) + get(engn_R_n1)) / 2
+        local curr_gs = get(gs_dref)
 
         avg_pitch = lim(avg_pitch, PITCH_MAX, PITCH_MIN)
         local min_idle = get(thr_resp) * avg_pitch
 
         local ias_accel = (avg_ias - ias_last) / get(f_time)
-        local pitch_accel = (avg_pitch - pitch_last) / get(f_time)
+        local gs_accel = (curr_gs - gs_last) / get(f_time)
 
-        local ias_predict = avg_ias + ias_accel * N_SEC_SPD_PREDICT
-
-        local tgt_kp = AT_KP + pitch_accel * 0.00001
-        if math.abs(avg_ias-get(tgt_ias)) > 20 then
-            tgt_kp = AT_KP_EXTRA  -- For the extra kick
-        end
-        set(pred_ias_kt, ias_predict)
-        autothrot_pid:update{tgt=get(tgt_ias), curr=ias_predict}
-        --set(thr_et, autothrot_pid.errtotal)
-        set(thr_cmd, autothrot_pid.output)
-        local autothr_cmd = lim(get(throttle_cmd)+autothrot_pid.output, 1, min_idle)
+        local ias_err = get(tgt_ias) - avg_ias
+        local at_out = AT_KP * ias_err - AT_KD * (gs_accel - (avg_vs / 16000))
+        set(thr_cmd, at_out)
+        local autothr_cmd = lim(get(throttle_cmd)+at_out, 1, min_idle)
         if autothr_cmd > get(throttle_cmd) and 
             (math.abs(avg_n1 - get(n1_lim)) <= THR_MAX_N1_DEV or avg_n1 > get(n1_lim)) then
             local n1_hold_cmd = getThrottleN1HoldCmd()
@@ -119,11 +111,15 @@ function setThrottleIASHoldCmd()
         local thr_lvr_cmd = EvenChange(get(throttle_cmd), autothr_cmd, THR_SERVO_RESPONSE)
         set(throttle_cmd, thr_lvr_cmd)
         ias_last = avg_ias
-        pitch_last = avg_pitch
+        gs_last = curr_gs
     end
 end
 
-function setThrottleRetardCmd()
+function setThrottleRetardCmd(v_mode)
+    local spd_set = THR_SERVO_RESPONSE
+    if v_mode == 4 then  -- Flc descend
+        spd_set = spd_set / 10
+    end
     local thr_lvr_cmd = EvenChange(get(throttle_cmd), 0, THR_SERVO_RESPONSE)
     set(throttle_cmd, thr_lvr_cmd)
 end
@@ -138,6 +134,7 @@ end
 function updateMode()
     local avg_ra = (get(ra_pilot) + get(ra_copilot)) / 2
     local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
+    local v_mode = get(curr_vert_mode)
 
     if get(L_reverser_deployed) == 1 or get(R_reverser_deployed) == 1 or 
         get(at_disc) == 1 then
@@ -151,9 +148,15 @@ function updateMode()
         curr_at_mode ~= AT_MODE_HOLD then
         curr_at_mode = AT_MODE_THR_REF
         at_engaged = false
-    elseif avg_ias > 50 and curr_at_mode == AT_MODE_THR_REF then
+    elseif avg_ias > 50 and curr_at_mode == AT_MODE_THR_REF and v_mode == 0 then
         curr_at_mode = AT_MODE_HOLD
         at_engaged = false
+    elseif (avg_ra > 400 or at_engaged) and v_mode >= 3 then
+        if v_mode == 3 then
+            curr_at_mode = AT_MODE_THR_REF
+        else
+            curr_at_mode = AT_MODE_RETARD
+        end
     elseif get(autothr_arm) == 1 and get(spd_hold) == 1 then
         if (avg_ra > 400 and (curr_at_mode == AT_MODE_HOLD or 
             curr_at_mode == AT_MODE_OFF)) or at_engaged then 
@@ -179,7 +182,7 @@ function update()
     updateMode()
     if curr_at_mode ~= AT_MODE_IAS_HOLD then
         ias_last = (get(cas_pilot) + get(cas_copilot)) / 2
-        pitch_last = (get(pitch_pilot) + get(pitch_copilot)) / 2
+        gs_last = get(gs_dref)
     end
     if curr_at_mode == AT_MODE_IAS_HOLD then
         setThrottleIASHoldCmd()
