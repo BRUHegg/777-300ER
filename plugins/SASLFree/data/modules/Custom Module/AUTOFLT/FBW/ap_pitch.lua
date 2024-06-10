@@ -1,6 +1,6 @@
-pitch_kp = createGlobalPropertyf("Strato/777/pitch_dbg/kp", -0.02)
+pitch_kp = createGlobalPropertyf("Strato/777/pitch_dbg/kp", -0.04)
 pitch_ki = createGlobalPropertyf("Strato/777/pitch_dbg/ki", 0)
-pitch_kd = createGlobalPropertyf("Strato/777/pitch_dbg/kd", -0.37)
+pitch_kd = createGlobalPropertyf("Strato/777/pitch_dbg/kd", -0.74)
 pitch_et = createGlobalPropertyf("Strato/777/pitch_dbg/et", 0)
 pitch_resp = createGlobalPropertyf("Strato/777/pitch_dbg/resp", -0.11)
 ias_pred_sec = createGlobalPropertyf("Strato/777/pitch_dbg/ias_pred_sec", 8)
@@ -63,6 +63,7 @@ vshold_pitch_deg = 0
 
 VSHOLD_PITCH_MAX_DEG = 20
 VSHOLD_PITCH_MIN_DEG = -10
+FLC_CLB_PITCH_MIN_DEG = 5
 
 ALT_HOLD_ALT_REACH_SEC = 10
 ALT_HOLD_DECEL = 10
@@ -86,6 +87,11 @@ VERT_MODE_VSHOLD = 1
 VERT_MODE_ALTHOLD = 2
 VERT_MODE_FLC_CLB = 3
 VERT_MODE_FLC_DES = 4
+
+FLC_CLB_KP = -0.04
+FLC_CLB_KD = -0.74
+FLC_DES_KP = -0.02
+FLC_DES_KD = -0.37
 
 vert_mode = VERT_MODE_OFF
 
@@ -154,21 +160,24 @@ function getAutopilotFlcCmd(pitch_cmd_prev)
         local vs_avg_fpm = (get(vs_pilot_fpm) + get(vs_copilot_fpm)) / 2
         local curr_gs = get(gs_dref)
 
-        --local ias_accel = (ias_avg_kts - ias_last) / get(f_time)
         local gs_accel = (curr_gs - gs_last) / get(f_time)
 
-        --local ias_pred = ias_avg_kts + ias_accel * get(ias_pred_sec)
-        --set(ias_pred_kt, ias_pred)
-
         local ias_err = get(tgt_ias) - ias_avg_kts
-        local flc_out = get(pitch_kp) * ias_err - get(pitch_kd) * (gs_accel - (vs_avg_fpm / 16000))
-        --flch_pid:update{kp=get(pitch_kp), ki=get(pitch_ki), kd=get(pitch_kd), 
-        --    tgt=get(tgt_ias), curr=ias_pred}
-        --set(pitch_et, flch_pid.errtotal)
-
+        
+        local tgt_kp = FLC_CLB_KP
+        local tgt_kd = FLC_CLB_KD
+        local pitch_max = VSHOLD_PITCH_MAX_DEG
+        local pitch_min = FLC_CLB_PITCH_MIN_DEG
+        if vert_mode == VERT_MODE_FLC_DES then
+            tgt_kp = FLC_DES_KP
+            tgt_kd = FLC_DES_KD
+            pitch_max = FLC_CLB_PITCH_MIN_DEG
+            pitch_min = VSHOLD_PITCH_MIN_DEG
+        end
+        local flc_out = tgt_kp * ias_err - tgt_kd * (gs_accel - (vs_avg_fpm / 16000))
         local tgt_cmd = pitch_cmd_prev+flc_out * get(f_time)
 
-        local flch_cmd = lim(tgt_cmd, VSHOLD_PITCH_MAX_DEG, VSHOLD_PITCH_MIN_DEG)
+        local flch_cmd = lim(tgt_cmd, pitch_max, pitch_min)
         set(pitch_tgt, flch_cmd)
         ias_last = ias_avg_kts
         return flch_cmd 
