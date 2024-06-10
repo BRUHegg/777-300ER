@@ -63,6 +63,7 @@ AT_FLARE_ENTRY_FT = 100
 THR_MAX_N1_DEV = 4
 
 at_flare_begin_ft = 0
+spd_flc_start_kts = 0
 
 AT_MODE_OFF = 0
 AT_MODE_IAS_HOLD = 1
@@ -132,9 +133,11 @@ end
 
 function setThrottleFlcCmd(v_mode)
     if v_mode == 3 then  -- Flc climb
-        setThrottleIASHoldCmd(get(tgt_ias)+35)
+        local tgt_spd_kts = math.max(get(tgt_ias)+35, spd_flc_start_kts+35)
+        setThrottleIASHoldCmd(tgt_spd_kts)
     else
-        setThrottleIASHoldCmd(get(tgt_ias)-8)
+        local tgt_spd_kts = math.min(get(tgt_ias)-8, spd_flc_start_kts-8)
+        setThrottleIASHoldCmd(tgt_spd_kts)
     end
 end
 
@@ -161,6 +164,9 @@ function updateMode(v_mode)
         curr_at_mode = AT_MODE_HOLD
         at_engaged = false
     elseif (avg_ra > 400 or at_engaged) and v_mode >= 3 and get(alt_acq) == 0 then
+        if curr_at_mode < AT_MODE_FLC_REF then
+            spd_flc_start_kts = ias_last
+        end
         if v_mode == 3 then
             curr_at_mode = AT_MODE_FLC_REF
         else
