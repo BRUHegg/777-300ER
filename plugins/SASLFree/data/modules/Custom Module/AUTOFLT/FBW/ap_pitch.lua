@@ -1,15 +1,22 @@
-pitch_kp = createGlobalPropertyf("Strato/777/pitch_dbg/kp", -0.04)
-pitch_ki = createGlobalPropertyf("Strato/777/pitch_dbg/ki", 0)
-pitch_kd = createGlobalPropertyf("Strato/777/pitch_dbg/kd", -0.74)
+pitch_kp = createGlobalPropertyf("Strato/777/pitch_dbg/kp", 0.00037)
+pitch_ki = createGlobalPropertyf("Strato/777/pitch_dbg/ki", -1)
+pitch_kd = createGlobalPropertyf("Strato/777/pitch_dbg/kd", 0.0013)
 pitch_et = createGlobalPropertyf("Strato/777/pitch_dbg/et", 0)
 pitch_resp = createGlobalPropertyf("Strato/777/pitch_dbg/resp", -0.11)
 ias_pred_sec = createGlobalPropertyf("Strato/777/pitch_dbg/ias_pred_sec", 8)
 ias_pred_kt = createGlobalPropertyf("Strato/777/pitch_dbg/ias_pred_kt", 0)
 vs_cmd = createGlobalPropertyf("Strato/777/pitch_dbg/vscmd", 0)
 alt_cmd = createGlobalPropertyf("Strato/777/pitch_dbg/altcmd", 0)
-vs_tgt = createGlobalPropertyf("Strato/777/pitch_dbg/vs_tgt", 0)
+--vs_tgt = createGlobalPropertyf("Strato/777/pitch_dbg/vs_tgt", 0)
 tgt_ias = globalPropertyf("sim/cockpit2/autopilot/airspeed_dial_kts")
 ap_pitch_eng = createGlobalPropertyi("Strato/777/pitch_dbg/eng", 0)
+
+pitch_fltdir_pilot = createGlobalPropertyi("Strato/777/pfd/pitch_fltdir_pilot", 0)
+pitch_fltdir_copilot = createGlobalPropertyi("Strato/777/pfd/pitch_fltdir_copilot", 0)
+
+flt_dir_pilot = globalPropertyi("Strato/777/mcp/flt_dir_pilot", 0)
+flt_dir_copilot = globalPropertyi("Strato/777/mcp/flt_dir_copilot", 0)
+
 vshold_eng = createGlobalPropertyi("Strato/777/mcp/vshold", 1)
 flch_eng = globalPropertyi("Strato/777/mcp/flch")
 alt_hold_eng = createGlobalPropertyi("Strato/777/mcp/althold", 0)
@@ -31,7 +38,7 @@ cas_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/airspeed_kts_copil
 pitch_tgt = createGlobalPropertyf("Strato/777/autopilot/pitch_tgt_deg", 0)
 ap_pitch_on = createGlobalPropertyi("Strato/777/autopilot/ap_pitch_on", 0)
 
---vs_tgt = globalPropertyf("sim/cockpit2/autopilot/vvi_dial/fpm")
+vs_tgt = globalPropertyf("sim/cockpit2/autopilot/vvi_dial_fpm")
 ap_engaged = globalPropertyi("Strato/777/mcp/ap_on", 0)
 
 -- Sim sensor datarefs
@@ -103,7 +110,7 @@ function getIASCorrection()
 
         ias_last = ias_avg_kts
 
-        return ias_accel * -0.11
+        return ias_accel * get(pitch_ki)
     else
         return 0
     end
@@ -130,8 +137,12 @@ end
 function getAutopilotVSHoldCmd(pitch_cmd_prev, vs_cmd_fpm)
     if get(f_time) ~= 0 then
         local vs_avg_fpm = (get(vs_pilot_fpm) + get(vs_copilot_fpm)) / 2
-        
+        local ias_avg_kts = (get(cas_pilot) + get(cas_pilot)) / 2
+        local avg_pitch_deg = (get(pitch_pilot) + get(pitch_copilot)) / 2
+
+
         local vs_accel = (vs_avg_fpm - vs_last_ft) / get(f_time)
+        local ias_accel = (ias_avg_kts - ias_last) / get(f_time)
 
         local vs_pred = vs_avg_fpm + vs_accel * get(vs_pred_sec)
         set(vs_pred_fpm, vs_pred)
@@ -141,14 +152,19 @@ function getAutopilotVSHoldCmd(pitch_cmd_prev, vs_cmd_fpm)
             tgt_kp = 0.001
         end
 
-        vshold_pid:update{kp=tgt_kp, tgt=vs_cmd_fpm, curr=vs_pred}
-        set(pitch_et, vshold_pid.errtotal)
-        
-        local tgt_cmd = pitch_cmd_prev+vshold_pid.output * get(f_time)
+        --vshold_pid:update{kp=tgt_kp, tgt=vs_cmd_fpm, curr=vs_pred}
+        --set(pitch_et, vshold_pid.errtotal)
+        local vs_err = vs_cmd_fpm - vs_pred
+        local vshold_out = vs_err * get(pitch_kp) - vs_accel * get(pitch_kd)
+
+        local tgt_cmd = pitch_cmd_prev+ (vshold_out * get(f_time))
 
         local vshold_cmd = lim(tgt_cmd, VSHOLD_PITCH_MAX_DEG, VSHOLD_PITCH_MIN_DEG)
-        set(pitch_tgt, vshold_cmd)
+        set(pitch_et, vshold_cmd)
+        local flt_dir_cmd = lim(vshold_cmd - avg_pitch_deg, 20, -20)
+        set(pitch_tgt, flt_dir_cmd)
         vs_last_ft = vs_avg_fpm
+        ias_last = ias_avg_kts
         return vshold_cmd 
     end
 
@@ -159,6 +175,7 @@ function getAutopilotFlcCmd(pitch_cmd_prev)
     if get(f_time) ~= 0 then
         local ias_avg_kts = (get(cas_pilot) + get(cas_pilot)) / 2
         local vs_avg_fpm = (get(vs_pilot_fpm) + get(vs_copilot_fpm)) / 2
+        local avg_pitch_deg = (get(pitch_pilot) + get(pitch_copilot)) / 2
         local curr_gs = get(gs_dref)
 
         local gs_accel = (curr_gs - gs_last) / get(f_time)
@@ -179,7 +196,8 @@ function getAutopilotFlcCmd(pitch_cmd_prev)
         local tgt_cmd = pitch_cmd_prev+flc_out * get(f_time)
 
         local flch_cmd = lim(tgt_cmd, pitch_max, pitch_min)
-        set(pitch_tgt, flch_cmd)
+        local flt_dir_cmd = lim(flch_cmd - avg_pitch_deg, 20, -20)
+        set(pitch_tgt, flt_dir_cmd)
         ias_last = ias_avg_kts
         return flch_cmd 
     end
@@ -188,12 +206,12 @@ end
 
 function getAutopilotVSHoldCmdFull()
     vshold_pitch_deg = getAutopilotVSHoldCmd(vshold_pitch_deg, vs_hold_vs_tgt) 
-    return vshold_pitch_deg + getIASCorrection() + getSpoilerCorrection()
+    return vshold_pitch_deg
 end
 
 function getAutopilotFlcCmdFull()
     vshold_pitch_deg = getAutopilotFlcCmd(vshold_pitch_deg)
-    return vshold_pitch_deg + getSpoilerCorrection()
+    return vshold_pitch_deg + getIASCorrection() + getSpoilerCorrection()
 end
 
 function getAutopilotAltHoldCmd()
@@ -237,6 +255,10 @@ function updateMode()
         set(pitch_resp, tmp_margin)
     end
 
+    if get(vshold_eng) == 0 and mcp_alt_acq then
+        mcp_alt_acq = false
+    end
+
     if mcp_alt_acq then
         if not mcp_alt_tgt_set then
             alt_hold_alt_tgt = get(mcp_alt_val)
@@ -257,6 +279,8 @@ function updateMode()
             mcp_alt_acq = false
             mcp_alt_tgt_set = false
         end
+    elseif vert_mode ~= VERT_MODE_ALTHOLD then
+        alt_hold_alt_tgt = 0
     end
     if get(alt_hold_eng) == 1 and get(mcp_alt_val) ~= alt_hold_alt_blacklist then
         if mcp_alt_acq then
@@ -264,6 +288,7 @@ function updateMode()
             mcp_alt_tgt_set = false
             alt_hold_alt_acq = false
             vert_mode = VERT_MODE_ALTHOLD
+            set(vs_tgt, 0)
         else
             if math.abs(get(mcp_alt_val) - alt_avg_ft) > ALT_HOLD_CAPTURE_ALT_FT and 
                 vert_mode ~= VERT_MODE_ALTHOLD then
@@ -332,6 +357,20 @@ function updateMode()
     set(vs_cmd, vs_hold_vs_tgt)
 end
 
+function updatePitchFltDir() -- Updates pitch flight directors
+    if ap_engaged and get(flt_dir_pilot) == 1 then
+        set(pitch_fltdir_pilot, 1)
+    else
+        set(pitch_fltdir_pilot, 0)
+    end
+
+    if ap_engaged and get(flt_dir_copilot) == 1 then
+        set(pitch_fltdir_copilot, 1)
+    else
+        set(pitch_fltdir_copilot, 0)
+    end
+end
+
 function getAutopilotPitchCmd()
     updateMode()
     local pitch_cmd_deg = 0
@@ -356,5 +395,6 @@ function getAutopilotPitchCmd()
     gs_last = get(gs_dref)
     set(curr_vert_mode, vert_mode)
     set(alt_acq, bool2num(mcp_alt_acq))
+    updatePitchFltDir()
     return pitch_cmd_deg
 end

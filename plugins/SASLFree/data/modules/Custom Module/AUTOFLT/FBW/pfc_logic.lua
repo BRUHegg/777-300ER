@@ -255,7 +255,9 @@ function UpdatePFCElevatorCommand(pitch_input_last, pitch_last, k_pitch, k_flare
 		local ap_pitch_cmd = getAutopilotPitchCmd()
 		local tmp_int = d_int[m_i] + ((d_int[m_i] - d_int[m_i-1]) * (tmp_mass - 
 				no_pitch_speeds[m_i-1][1])) / (no_pitch_speeds[m_i][1] - no_pitch_speeds[m_i-1][1])
+		local k_fbw = 0.15
 		if not ap_pitch_is_on then
+			k_fbw = 0.05
 			if math.abs(get(pfc_pilot_input, 3)) > 0.08 then
 				local k_man = 3.7 + 2 * math.abs(get(pfc_pilot_input, 3))
 				commanded_pitch = get(pfc_pilot_input, 3) * k_man
@@ -269,7 +271,7 @@ function UpdatePFCElevatorCommand(pitch_input_last, pitch_last, k_pitch, k_flare
 		end
 		set(fbw_pitch_cmd, fbw_pitch)
 		--Maintain a certain pitch speed
-		local fbw_delta = (fbw_pitch - avg_pitch) * 0.15
+		local fbw_delta = (fbw_pitch - avg_pitch) * k_fbw
 		local curr_delta = (avg_pitch - pitch_last) * (1 / get(f_time))
 		p_delta_pid:update{tgt = fbw_delta * k_pitch 
 							+ flare_pitch_change * k_flare
@@ -445,4 +447,5 @@ function update()
 		fbw_roll_past = tmp[3]
 	end
 	local ap_roll_cmd = getAutopilotRollCmd()
+	local ap_pitch_cmd = getAutopilotPitchCmd()
 end

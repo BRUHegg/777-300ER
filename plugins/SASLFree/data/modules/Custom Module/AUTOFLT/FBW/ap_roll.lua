@@ -7,8 +7,13 @@ roll_tgt = createGlobalPropertyf("Strato/777/autopilot/roll_tgt_deg", 0)
 hdg_sel_eng = createGlobalPropertyi("Strato/777/mcp/hdg_sel_eng", 0)
 hdg_hold_eng = createGlobalPropertyi("Strato/777/mcp/hdg_hold_eng", 1)
 hdg_to_trk = createGlobalPropertyi("Strato/777/mcp/hdg_to_trk", 0)
-flt_dir_pilot = createGlobalPropertyi("Strato/777/mcp/flt_dir_pilot", 0)
-flt_dir_copilot = createGlobalPropertyi("Strato/777/mcp/flt_dir_copilot", 0)
+
+roll_fltdir_pilot = createGlobalPropertyi("Strato/777/pfd/roll_fltdir_pilot", 0)
+roll_fltdir_copilot = createGlobalPropertyi("Strato/777/pfd/roll_fltdir_copilot", 0)
+
+flt_dir_pilot = globalPropertyi("Strato/777/mcp/flt_dir_pilot", 0)
+flt_dir_copilot = globalPropertyi("Strato/777/mcp/flt_dir_copilot", 0)
+
 ap_engaged = globalPropertyi("Strato/777/mcp/ap_on", 0)
 ap_roll_on = createGlobalPropertyi("Strato/777/autopilot/ap_roll_on", 0)
 
@@ -103,7 +108,22 @@ function getAutopilotHdgTrkHoldCmd()
     end
 end
 
+function updateRollFltDir() -- Updates roll flight directors
+    if ap_engaged and get(flt_dir_pilot) == 1 then
+        set(roll_fltdir_pilot, 1)
+    else
+        set(roll_fltdir_pilot, 0)
+    end
+
+    if ap_engaged and get(flt_dir_copilot) == 1 then
+        set(roll_fltdir_copilot, 1)
+    else
+        set(roll_fltdir_copilot, 0)
+    end
+end
+
 function getAutopilotRollCmd()
+    updateRollFltDir()
     if get(hdg_sel_eng) == 1 then
         hdg_hold_val = -1
         hdg_hold_to_select = false
