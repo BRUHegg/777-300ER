@@ -12,6 +12,8 @@ at_disc = globalPropertyi("Strato/777/mcp/at_disc", 0)
 n1_lim = createGlobalPropertyf("Strato/777/autothr/n1_lim", 95)
 throt_res_rt = createGlobalPropertyf("Strato/777/autothr/throt_res_rt", 0.95)
 
+mcp_alt_val = globalPropertyf("sim/cockpit/autopilot/altitude")
+
 thr_kp = createGlobalPropertyf("Strato/777/autothr_dbg/kp", 0.000045)
 thr_ki = createGlobalPropertyf("Strato/777/autothr_dbg/ki", 0.000)
 thr_kd = createGlobalPropertyf("Strato/777/autothr_dbg/kd", 0.00058)
@@ -38,7 +40,8 @@ gs_dref = globalPropertyf("sim/cockpit2/gauges/indicators/ground_speed_kt")
 -- We use pitch here to limit idle thrust
 pitch_pilot = globalPropertyf("sim/cockpit/gyros/the_ind_ahars_pilot_deg")
 pitch_copilot = globalPropertyf("sim/cockpit/gyros/the_ind_ahars_copilot_deg")
-
+alt_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/altitude_ft_pilot")
+alt_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/altitude_ft_copilot")
 ra_pilot = globalPropertyf("sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_pilot")
 ra_copilot = globalPropertyf("sim/cockpit2/gauges/indicators/radio_altimeter_height_ft_copilot")
 
@@ -88,7 +91,7 @@ function getThrottleN1HoldCmd()  -- Just holds the n1 at n1_lim
     return AT_KP * n1_err
 end
 
-function setThrottleIASHoldCmd(ias_tgt_kts)
+function setThrottleIASHoldCmd(ias_tgt_kts, thr_ratio)
     at_engaged = true
     if get(f_time) ~= 0 then
         local avg_ias = (get(cas_pilot) + get(cas_copilot)) / 2
@@ -112,7 +115,7 @@ function setThrottleIASHoldCmd(ias_tgt_kts)
             local n1_hold_cmd = getThrottleN1HoldCmd()
             autothr_cmd = lim(get(throttle_cmd)+n1_hold_cmd, 1, min_idle)
         end
-        local thr_lvr_cmd = EvenChange(get(throttle_cmd), autothr_cmd, THR_SERVO_RESPONSE)
+        local thr_lvr_cmd = EvenChange(get(throttle_cmd), autothr_cmd * thr_ratio, THR_SERVO_RESPONSE)
         set(throttle_cmd, thr_lvr_cmd)
         ias_last = avg_ias
         gs_last = curr_gs
@@ -134,10 +137,13 @@ end
 function setThrottleFlcCmd(v_mode)
     if v_mode == 3 then  -- Flc climb
         local tgt_spd_kts = math.max(get(tgt_ias)+35, spd_flc_start_kts+35)
-        setThrottleIASHoldCmd(tgt_spd_kts)
+        local avg_alt = (get(alt_pilot) + get(alt_copilot)) / 2
+        local alt_err = get(mcp_alt_val) - avg_alt
+        local thr_ratio = lim(alt_err/4000, 1, 0.85)
+        setThrottleIASHoldCmd(tgt_spd_kts, thr_ratio)
     else
-        local tgt_spd_kts = math.min(get(tgt_ias)-8, spd_flc_start_kts-8)
-        setThrottleIASHoldCmd(tgt_spd_kts)
+        local tgt_spd_kts = math.min(get(tgt_ias)-12, spd_flc_start_kts-12)
+        setThrottleIASHoldCmd(tgt_spd_kts, 1)
     end
 end
 
@@ -202,7 +208,7 @@ function update()
         gs_last = get(gs_dref)
     end
     if curr_at_mode == AT_MODE_IAS_HOLD then
-        setThrottleIASHoldCmd(get(tgt_ias))
+        setThrottleIASHoldCmd(get(tgt_ias), 1)
     elseif curr_at_mode == AT_MODE_RETARD then
         setThrottleRetardCmd()
     elseif curr_at_mode == AT_MODE_THR_REF then
