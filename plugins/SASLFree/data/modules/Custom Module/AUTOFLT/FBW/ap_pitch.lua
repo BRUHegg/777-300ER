@@ -81,6 +81,7 @@ alt_intcpt_margin_ft = 0
 
 alt_hold_alt_acq = false
 mcp_alt_acq = false
+mcp_alt_tgt_set = false
 
 VERT_MODE_OFF = 0
 VERT_MODE_VSHOLD = 1
@@ -223,6 +224,7 @@ function updateMode()
     end
     
     local alt_err = get(mcp_alt_val) - alt_avg_ft
+    local alt_tgt_err = alt_hold_alt_tgt - alt_avg_ft
 
     if not mcp_alt_acq then
         local tmp_margin = getAltIntcAlt(vs_avg_fpm)
@@ -236,11 +238,16 @@ function updateMode()
     end
 
     if mcp_alt_acq then
-        if alt_err > 0 and alt_err <= alt_intcpt_margin_ft and vs_hold_vs_tgt >= 0 and 
-            vert_mode < VERT_MODE_FLC_CLB then
+        if not mcp_alt_tgt_set then
+            alt_hold_alt_tgt = get(mcp_alt_val)
+            mcp_alt_tgt_set = true
+        end
+        alt_tgt_err = alt_hold_alt_tgt - alt_avg_ft
+        if alt_tgt_err > 0 and alt_tgt_err <= alt_intcpt_margin_ft and 
+            vs_hold_vs_tgt >= 0 and vert_mode < VERT_MODE_FLC_CLB then
             vs_hold_vs_tgt = lim(vs_hold_vs_tgt, 700, 500)
-        elseif alt_err < 0 and alt_err >= -alt_intcpt_margin_ft and vs_hold_vs_tgt <= 0 and
-            vert_mode < VERT_MODE_FLC_CLB then
+        elseif alt_tgt_err < 0 and alt_tgt_err >= -alt_intcpt_margin_ft and 
+            vs_hold_vs_tgt <= 0 and vert_mode < VERT_MODE_FLC_CLB then
             vs_hold_vs_tgt = lim(vs_hold_vs_tgt, -500, -700)
         elseif vert_mode == VERT_MODE_FLC_CLB then
             vs_hold_vs_tgt = 700
@@ -248,33 +255,44 @@ function updateMode()
             vs_hold_vs_tgt = -700
         else
             mcp_alt_acq = false
+            mcp_alt_tgt_set = false
         end
     end
     if get(alt_hold_eng) == 1 and get(mcp_alt_val) ~= alt_hold_alt_blacklist then
-        if math.abs(get(mcp_alt_val) - alt_avg_ft) > ALT_HOLD_CAPTURE_ALT_FT and 
-            vert_mode ~= VERT_MODE_ALTHOLD then
-            vs_hold_vs_tgt = 0
-            vert_mode = VERT_MODE_VSHOLD
-            alt_hold_alt_acq = true
+        if mcp_alt_acq then
             mcp_alt_acq = false
-            set(flch_eng, 0)
-        elseif math.abs(get(mcp_alt_val) - alt_avg_ft) <= ALT_HOLD_CAPTURE_ALT_FT and 
-            vert_mode ~= VERT_MODE_ALTHOLD then
-            vert_mode = VERT_MODE_ALTHOLD
-            mcp_alt_acq = false
-            set(vs_tgt, 0)
-            set(vshold_eng, 0)
-            set(flch_eng, 0)
-            alt_hold_alt_tgt = get(mcp_alt_val)
-        end
-        if alt_hold_alt_acq and vs_avg_fpm < 100 then
+            mcp_alt_tgt_set = false
             alt_hold_alt_acq = false
-            mcp_alt_acq = false
             vert_mode = VERT_MODE_ALTHOLD
-            alt_hold_alt_tgt = alt_avg_ft
-            set(vs_tgt, 0)
-            set(vshold_eng, 0)
-            set(flch_eng, 0)
+        else
+            if math.abs(get(mcp_alt_val) - alt_avg_ft) > ALT_HOLD_CAPTURE_ALT_FT and 
+                vert_mode ~= VERT_MODE_ALTHOLD then
+                vs_hold_vs_tgt = 0
+                vert_mode = VERT_MODE_VSHOLD
+                alt_hold_alt_acq = true
+                mcp_alt_acq = false
+                mcp_alt_tgt_set = false
+                set(flch_eng, 0)
+            elseif math.abs(get(mcp_alt_val) - alt_avg_ft) <= ALT_HOLD_CAPTURE_ALT_FT and 
+                vert_mode ~= VERT_MODE_ALTHOLD then
+                vert_mode = VERT_MODE_ALTHOLD
+                mcp_alt_acq = false
+                mcp_alt_tgt_set = false
+                set(vs_tgt, 0)
+                set(vshold_eng, 0)
+                set(flch_eng, 0)
+                alt_hold_alt_tgt = get(mcp_alt_val)
+            end
+            if alt_hold_alt_acq and vs_avg_fpm < 200 then
+                alt_hold_alt_acq = false
+                mcp_alt_acq = false
+                mcp_alt_tgt_set = false
+                vert_mode = VERT_MODE_ALTHOLD
+                alt_hold_alt_tgt = alt_avg_ft
+                set(vs_tgt, 0)
+                set(vshold_eng, 0)
+                set(flch_eng, 0)
+            end
         end
     elseif get(vshold_eng) == 1 then
         if get(flch_eng) == 1 and vert_mode == VERT_MODE_VSHOLD then
@@ -282,11 +300,11 @@ function updateMode()
         else
             if get(flch_eng) == 1 then
                 set(flch_eng, 0)
+                set(vs_tgt, vs_avg_fpm)
             end
-            if math.abs(alt_err) <= ALT_HOLD_CAPTURE_ALT_FT then
+            if math.abs(alt_tgt_err) <= ALT_HOLD_CAPTURE_ALT_FT and mcp_alt_acq then
                 set(alt_hold_eng, 1)
                 set(vshold_eng, 0)
-                mcp_alt_acq = false
             elseif not mcp_alt_acq then
                 vs_hold_vs_tgt = get(vs_tgt)
             end
@@ -298,10 +316,9 @@ function updateMode()
         else
             vert_mode = VERT_MODE_FLC_DES
         end
-        if math.abs(alt_err) <= ALT_HOLD_CAPTURE_ALT_FT then
+        if math.abs(alt_tgt_err) <= ALT_HOLD_CAPTURE_ALT_FT and mcp_alt_acq then
             set(alt_hold_eng, 1)
             set(flch_eng, 0)
-            mcp_alt_acq = false
         end
     else
         vert_mode = VERT_MODE_OFF
